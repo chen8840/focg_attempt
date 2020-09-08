@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    var ctx = initCanvas(document.getElementById('canvas'));
+
+    var img = new Image();
+    img.src = './test.jpg';
+
+    img.onload = function() {
+      console.log(123);
+      ctx.scale(2,2)
+      ctx.drawImage(img, 0, 0);
+    }
+    
+    function initCanvas(canvas) {
+      var ctx = canvas.getContext('2d');
+
+      var size = 600;
+      canvas.style.width = size + "px";
+      canvas.style.height = size + "px";
+
+      // Set actual size in memory (scaled to account for extra pixel density).
+      var scale = window.devicePixelRatio; // Change to 1 on retina screens to see blurry canvas.
+      canvas.width = Math.floor(size * scale);
+      canvas.height = Math.floor(size * scale);
+
+      ctx.scale(scale, scale);
+      return ctx;
+    };
+  </script>
+</body>
+</html>

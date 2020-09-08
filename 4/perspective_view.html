@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <style>
+    canvas {
+      box-shadow: 0 0 1px black;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script type="module">
+    import Vector3 from './Vector3.js';
+    var HEIGHT = 600;
+    var WIDTH = 600;
+    var FOCAL_LENGTH = 100;
+    var g = {
+      cameraPosition: null,
+      cameraV: null,
+      cameraUpV: null,
+      cameraRightV: null,
+      imageData: null,
+      x: 100,
+      xAdd: true,
+    };
+    // 依据右手定则，x轴向右，y轴向上，z轴向内
+    main();
+
+    async function main() {
+      var canvas = document.getElementById('canvas');
+      var ctx = initCanvas(canvas);
+
+      var offScreenImgData = await getOffScreenImgData();
+      g.imageData = offScreenImgData;
+
+      // drawOffScreenImg(WIDTH, HEIGHT, canvas.getContext('2d'), offScreenImgData);;
+      anim(ctx);
+    }
+
+    function initCanvas(canvas) {
+      var ctx = canvas.getContext('2d');
+
+      var size = WIDTH;
+      canvas.style.width = size + "px";
+      canvas.style.height = size + "px";
+
+      // Set actual size in memory (scaled to account for extra pixel density).
+      var scale = window.devicePixelRatio; // Change to 1 on retina screens to see blurry canvas.
+      canvas.width = Math.floor(size * scale);
+      canvas.height = Math.floor(size * scale);
+
+      ctx.scale(scale, scale);
+      return ctx;
+    }
+
+    async function getOffScreenImgData() {
+      var canvas = document.createElement('canvas');
+      canvas.width = WIDTH / 2;
+      canvas.height = HEIGHT / 2;
+      var img = new Image();
+      img.src = './test.jpg';
+      return await new Promise(r => {
+        img.onload = () => {
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          r(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        }
+      });
+    }
+
+    function getImgRGBAOfXY(x, y) {
+      var defaultRGBA = {r: 255, g: 255, b: 255, a: 255};
+      var imageData = g.imageData;
+      var ix = Math.floor(x + imageData.width / 2);
+      var iy = Math.floor(-y + imageData.height / 2)
+      if (ix >= imageData.width || ix < 0) {
+        return defaultRGBA;
+      }
+      if (iy >= imageData.height || iy < 0) {
+        return defaultRGBA;
+      }
+      var index = iy * imageData.width * 4 + ix * 4;
+      return {r: imageData.data[index], g: imageData.data[index + 1], b: imageData.data[index + 2], a: imageData.data[index + 3]};
+    }
+
+    function axisXToCanvasX(x, canvasWidth) {
+      return x + canvasWidth / 2;
+    }
+
+    function canvasXToAxisX(x, canvasWidth) {
+      return x - canvasWidth / 2;
+    }
+
+    function axisYToCanvasY(y, canvasHeight) {
+      return -y + canvasHeight / 2;
+    }
+
+    function canvasYToAxisY(y, canvasHeight) {
+      return -y + canvasHeight / 2;
+    }
+
+    function setUpCameraPosition(x, y, z) {
+      g.cameraPosition = new Vector3(x, y, z);
+      g.cameraV = new Vector3(x, y, z);
+      var vectorY = new Vector3(0, 1, 0);
+      // 与z轴，摄像头垂直的向量
+      var v = Vector3.crossProduct(g.cameraV, vectorY);
+      // 摄像头的上方向
+      g.cameraUpV = Vector3.crossProduct(v, g.cameraV);
+      g.cameraRightV = Vector3.crossProduct(g.cameraUpV, g.cameraV);
+      g.cameraV.normalize();
+      g.cameraUpV.normalize();
+      g.cameraRightV.normalize();
+    }
+
+    function drawPerspectiveView(ctx) {
+      var offScreenCanvas = document.createElement('canvas');
+      offScreenCanvas.width = WIDTH;
+      offScreenCanvas.height = HEIGHT;
+      var offScreenCtx = offScreenCanvas.getContext('2d');
+
+      var imgData = offScreenCtx.createImageData(WIDTH, HEIGHT);
+      for (var x = 0; x < WIDTH; ++x) {
+        for (var y = 0; y < HEIGHT; ++y) {
+          var {r, g, b, a} = getProjectXYColor(canvasXToAxisX(x, WIDTH), canvasYToAxisY(y, HEIGHT));
+          var index = y * WIDTH * 4 + x * 4;
+          imgData.data[index] = r;
+          imgData.data[index + 1] = g;
+          imgData.data[index + 2] = b;
+          imgData.data[index + 3] = a;
+        }
+      }
+      offScreenCtx.putImageData(imgData, 0, 0);
+
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      ctx.drawImage(offScreenCanvas, 0, 0);
+    }
+
+    // 获取摄像头投影平面x,y位置的颜色
+    function getProjectXYColor(x, y) {
+      // 射线的起始点，ray.origin = g.cameraPosition
+      var eV = g.cameraPosition;
+      var dw = g.cameraV.mulScalar(FOCAL_LENGTH);
+      // 射线的方向, ray.direction = -dw + xu + yv;
+      var w = dw.mulScalar(-1).add(g.cameraRightV.mulScalar(x).add(g.cameraUpV.mulScalar(y)));
+      // 求o - tw = (x, y, 0)
+      var t = eV.z / w.z * -1;
+      // z=0平面上的x,y坐标
+      var ox = eV.x + t * w.x;
+      var oy = eV.y + t * w.y;
+      // console.log(ox, oy);
+      return getImgRGBAOfXY(ox, oy);
+    }
+
+    function anim(ctx) {
+      var minX = -100;
+      var maxX = 100;
+      var y = 130;
+      var z = 200;
+      var x = g.x;
+      if (g.x > maxX) {
+        g.x = maxX;
+        g.xAdd = false;
+      } else if(g.x < minX) {
+        g.x = minX;
+        g.xAdd = true;
+      }
+      if (g.xAdd) {
+        g.x = g.x + 1;
+      } else {
+        g.x = g.x - 1;
+      }
+      setUpCameraPosition(x, y, z);
+      drawPerspectiveView(ctx);
+      // window.requestAnimationFrame(anim.bind(undefined, ctx));
+      setTimeout(anim.bind(undefined, ctx), 100);
+    }
+  </script>
+</body>
+</html>
