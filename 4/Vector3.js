@@ -27,7 +27,7 @@ class Vector3 {
     return new Vector3(this.x + v.x, this.y + v.y, this.z + v.z);
   }
 
-  reduce(v) {
+  subtract(v) {
     return new Vector3(this.x - v.x, this.y - v.y, this.z - v.z);
   }
 

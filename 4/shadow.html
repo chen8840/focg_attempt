@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <style>
+    canvas {
+      box-shadow: 0 0 1px black;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script type="module">
+    import Vector3 from './Vector3.js';
+    var HEIGHT = 600;
+    var WIDTH = 600;
+    var FOCAL_LENGTH = 100;
+    var g = {
+      cameraPosition: null,
+      cameraV: null,
+      cameraUpV: null,
+      cameraRightV: null,
+      sphereRadius: 200,
+      angle: 0,
+      light: {
+        direction: new Vector3(-1, 1, 0.1),
+        intensity: 1.2,
+        phongExponent: 60
+      }
+    };
+    g.light.direction.normalize();
+    // 依据右手定则，x轴向右，y轴向上，z轴向内
+    main();
+
+    async function main() {
+      var canvas = document.getElementById('canvas');
+      var ctx = initCanvas(canvas);
+
+      // drawOffScreenImg(WIDTH, HEIGHT, canvas.getContext('2d'), offScreenImgData);;
+      anim(ctx);
+    }
+
+    function initCanvas(canvas) {
+      var ctx = canvas.getContext('2d');
+
+      var size = WIDTH;
+      canvas.style.width = size + "px";
+      canvas.style.height = size + "px";
+
+      // Set actual size in memory (scaled to account for extra pixel density).
+      var scale = window.devicePixelRatio; // Change to 1 on retina screens to see blurry canvas.
+      canvas.width = Math.floor(size * scale);
+      canvas.height = Math.floor(size * scale);
+
+      ctx.scale(scale, scale);
+      return ctx;
+    }
+
+    function axisXToCanvasX(x, canvasWidth) {
+      return x + canvasWidth / 2;
+    }
+
+    function canvasXToAxisX(x, canvasWidth) {
+      return x - canvasWidth / 2;
+    }
+
+    function axisYToCanvasY(y, canvasHeight) {
+      return -y + canvasHeight / 2;
+    }
+
+    function canvasYToAxisY(y, canvasHeight) {
+      return -y + canvasHeight / 2;
+    }
+
+    function setUpCameraPosition(x, y, z) {
+      g.cameraPosition = new Vector3(x, y, z);
+      g.cameraV = new Vector3(x, y, z);
+      var vectorY = new Vector3(0, 1, 0);
+      // 与z轴，摄像头垂直的向量
+      var v = Vector3.crossProduct(g.cameraV, vectorY);
+      // 摄像头的上方向
+      g.cameraUpV = Vector3.crossProduct(v, g.cameraV);
+      g.cameraRightV = Vector3.crossProduct(g.cameraUpV, g.cameraV);
+      g.cameraV.normalize();
+      g.cameraUpV.normalize();
+      g.cameraRightV.normalize();
+    }
+
+    function drawPerspectiveView(ctx) {
+      var offScreenCanvas = document.createElement('canvas');
+      offScreenCanvas.width = WIDTH;
+      offScreenCanvas.height = HEIGHT;
+      var offScreenCtx = offScreenCanvas.getContext('2d');
+
+      var imgData = offScreenCtx.createImageData(WIDTH, HEIGHT);
+      for (var x = 0; x < WIDTH; ++x) {
+        for (var y = 0; y < HEIGHT; ++y) {
+          var {r, g, b, a} = getProjectXYColor(canvasXToAxisX(x, WIDTH), canvasYToAxisY(y, HEIGHT));
+          var index = y * WIDTH * 4 + x * 4;
+          imgData.data[index] = r;
+          imgData.data[index + 1] = g;
+          imgData.data[index + 2] = b;
+          imgData.data[index + 3] = a;
+        }
+      }
+      offScreenCtx.putImageData(imgData, 0, 0);
+
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      ctx.drawImage(offScreenCanvas, 0, 0);
+    }
+
+    // 获取摄像头投影平面x,y位置的颜色
+    function getProjectXYColor(x, y) {
+      var defaultRGBA = {r: 255, g: 255, b: 255, a: 255};
+      var sphereColor = {r: 31, g: 188, b: 70, a: 255};
+      var shadowRGBA = {r: 100, g: 100, b: 100, a: 255};
+      // 射线的起始点，ray.origin = g.cameraPosition
+      var eV = g.cameraPosition;
+      var dw = g.cameraV.mulScalar(FOCAL_LENGTH);
+      // 射线的方向, ray.direction = -dw + xu + yv;
+      var w = dw.mulScalar(-1).add(g.cameraRightV.mulScalar(x).add(g.cameraUpV.mulScalar(y)));
+      // 圆中心(0, 0)，圆半径200
+      // 求(o + tw) * (o + tw) - R * R = 0
+      // discriminant = B * B - 4 * A * C
+      var discriminant = Math.pow(w.dotProduct(eV) * 2, 2) - 4 * w.dotProduct(w) * (eV.dotProduct(eV) - g.sphereRadius * g.sphereRadius);
+      if (discriminant >= 0) {
+        var t = ((-2) * w.dotProduct(eV) - Math.sqrt(discriminant)) / (2 * w.dotProduct(w));
+        var normalV = eV.add(w.mulScalar(t));
+        normalV.normalize();
+        return calcShading(sphereColor, normalV);
+      } else {
+        // 底平面是(x, -g.sphereRadius - 20, z)
+        var t = (-g.sphereRadius - 20  - eV.y) / w.y;
+        if (t < 0) {
+          return defaultRGBA;
+        }
+        var planePosition = eV.add(w.mulScalar(t));
+        // 阴影碰撞，求(p + tl) * (p + tl) - R * R = 0; pos = planePosition, l = g.light.direction
+        var p = planePosition;
+        var l = g.light.direction;
+        discriminant = Math.pow(p.dotProduct(l) * 2, 2) - 4 * l.dotProduct(l) * (p.dotProduct(p) - g.sphereRadius * g.sphereRadius);
+        if (discriminant >= 0) {
+          return shadowRGBA;
+        } else {
+          return defaultRGBA;
+        }
+      }
+    }
+
+    function calcShading(color, normalV) {
+      var {r, g: _g, b, a} = color;
+      var surfacePoint = normalV.mulScalar(g.sphereRadius);
+      var cameraV = g.cameraPosition.subtract(surfacePoint);
+      cameraV.normalize();
+      var h = g.light.direction.add(cameraV);
+      h.normalize();
+      var pn = Math.max(0, h.dotProduct(normalV));
+      if (h.dotProduct(normalV) < 0) {
+        debugger;
+      }
+      var n = Math.max(0, g.light.direction.dotProduct(normalV));
+      return {
+        r: r * g.light.intensity * n + r * g.light.intensity * Math.pow(pn, g.light.phongExponent),
+        g: _g * g.light.intensity * n + _g * g.light.intensity * Math.pow(pn, g.light.phongExponent),
+        b: b * g.light.intensity * n + b * g.light.intensity * Math.pow(pn, g.light.phongExponent),
+        a
+      };
+    }
+
+    function anim(ctx) {
+      var minX = -100;
+      var maxX = 100;
+      var y = 0;
+      var z = 320;
+      var x = 0;
+      z = 320 * Math.cos(Math.PI * g.angle / 180);
+      x = 320 * Math.sin(Math.PI * g.angle / 180);
+      g.angle = g.angle + 5;
+      setUpCameraPosition(x, y, z);
+      drawPerspectiveView(ctx);
+      setTimeout(anim.bind(undefined, ctx), 100);
+    }
+  </script>
+</body>
+</html>
